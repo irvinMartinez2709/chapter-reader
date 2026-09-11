@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { SplashScreen } from './components/SplashScreen/SplashScreen'
 import { ColorPalette } from './components/ColorPalette/ColorPalette'
 import { Library } from './components/Library/Library'
@@ -10,6 +10,8 @@ import { Editor } from './components/Editor/Editor'
 import { Settings } from './pages/Settings'
 import { saveBook, generateId } from './utils/storage'
 import type { FlipBook } from './types/flipbook'
+import { App as CapApp } from '@capacitor/app'
+import { Toast } from './components/Toast/Toast'
 
 type Page = 'library' | 'upload' | 'editor' | 'reader' | 'settings'
 
@@ -84,6 +86,29 @@ function App() {
     setCurrentBook(null)
     setPage('library')
   }, [])
+
+  const lastBackPress = useRef(0)
+
+  useEffect(() => {
+    const handler = CapApp.addListener('backButton', () => {
+      if (page === 'reader' || page === 'editor' || page === 'settings') {
+        handleBackToLibrary()
+        return
+      }
+      if (page === 'library') {
+        const now = Date.now()
+        if (now - lastBackPress.current < 2000) {
+          CapApp.exitApp()
+        } else {
+          lastBackPress.current = now
+          window.dispatchEvent(new CustomEvent('show-toast', {
+            detail: { message: 'Presiona de nuevo para salir', type: 'info' }
+          }))
+        }
+      }
+    })
+    return () => { handler.then(h => h.remove()) }
+  }, [page, handleBackToLibrary])
 
   if (showSplash) {
     return <SplashScreen onComplete={() => setShowSplash(false)} />
@@ -192,6 +217,7 @@ function App() {
           Chapter v0.1.0
         </footer>
       </div>
+      <Toast />
     </div>
   )
 }

@@ -29,7 +29,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
         {/* Icono */}
         <div className="mb-6 mx-auto" style={{ width: 80, height: 80 }}>
           <img
-            src="/favicon.ico"
+            src="/icono.png"
             alt="Chapter"
             className="w-full h-full"
             style={{

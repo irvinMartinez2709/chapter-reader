@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { listBooks, deleteBook } from '../../utils/storage'
+import { ConfirmDialog } from '../ConfirmDialog/ConfirmDialog'
 import type { FlipBook } from '../../types/flipbook'
 
 interface LibraryProps {
@@ -11,6 +12,7 @@ interface LibraryProps {
 export function Library({ onReadBook, onEditBook, onNewBook }: LibraryProps) {
   const [books, setBooks] = useState<FlipBook[]>([])
   const [loading, setLoading] = useState(true)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   useEffect(() => {
     loadBooks()
@@ -23,9 +25,10 @@ export function Library({ onReadBook, onEditBook, onNewBook }: LibraryProps) {
     setLoading(false)
   }
 
-  const handleDelete = async (id: string) => {
-    if (confirm('¿Eliminar este libro?')) {
-      await deleteBook(id)
+  const handleDelete = async () => {
+    if (deleteTarget) {
+      await deleteBook(deleteTarget)
+      setDeleteTarget(null)
       await loadBooks()
     }
   }
@@ -115,7 +118,7 @@ export function Library({ onReadBook, onEditBook, onNewBook }: LibraryProps) {
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  handleDelete(book.id)
+                  setDeleteTarget(book.id)
                 }}
                 className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
               >
@@ -127,6 +130,16 @@ export function Library({ onReadBook, onEditBook, onNewBook }: LibraryProps) {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Eliminar libro"
+        message="¿Estás seguro de que quieres eliminar este libro? Esta acción no se puede deshacer."
+        confirmLabel="Eliminar"
+        danger
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
