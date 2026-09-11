@@ -3,7 +3,7 @@ import type { PageData, ConversionProgress } from '../types/flipbook'
 export async function convertPdfToImages(
   file: File,
   onProgress?: (progress: ConversionProgress) => void,
-  scale: number = 1.5
+  scale: number = 1.0
 ): Promise<PageData[]> {
   const pdfjsLib = await import('pdfjs-dist')
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -12,9 +12,11 @@ export async function convertPdfToImages(
   ).toString()
 
   const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, rangeChunkSize: 65536 }).promise
   const totalPages = pdf.numPages
   const pages: PageData[] = []
+
+  const MAX_WIDTH = 1200
 
   onProgress?.({
     phase: 'converting',
@@ -27,25 +29,37 @@ export async function convertPdfToImages(
     const page = await pdf.getPage(i)
     const viewport = page.getViewport({ scale })
 
-    const canvas = document.createElement('canvas')
-    canvas.width = viewport.width
-    canvas.height = viewport.height
-    const ctx = canvas.getContext('2d')!
+    let w = viewport.width
+    let h = viewport.height
+    if (w > MAX_WIDTH) {
+      const ratio = MAX_WIDTH / w
+      w = MAX_WIDTH
+      h = Math.round(h * ratio)
+    }
 
-    await page.render({ canvasContext: ctx, viewport, canvas }).promise
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d', { willReadFrequently: false })!
+
+    const scaledViewport = page.getViewport({ scale: scale * (w / viewport.width) })
+    await page.render({ canvasContext: ctx, viewport: scaledViewport, canvas }).promise
 
     const blob = await new Promise<Blob>((resolve) => {
       canvas.toBlob((b: Blob | null) => {
         if (b) resolve(b)
         else resolve(new Blob([]))
-      }, 'image/webp', 0.85)
+      }, 'image/webp', 0.75)
     })
+
+    canvas.width = 0
+    canvas.height = 0
 
     pages.push({
       pageNum: i,
       blob,
-      width: viewport.width,
-      height: viewport.height,
+      width: w,
+      height: h,
     })
 
     onProgress?.({

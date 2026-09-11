@@ -131,7 +131,7 @@ export async function convertEpubToImages(
       const blob = await new Promise<Blob>(resolve => {
         rendered.toBlob(b => {
           resolve(b || new Blob([]))
-        }, 'image/webp', 0.85)
+        }, 'image/webp', 0.75)
       })
 
       pages.push({

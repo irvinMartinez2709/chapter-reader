@@ -50,15 +50,23 @@ export async function convertImagesToBook(
 }
 
 async function convertToWebP(file: File): Promise<Blob> {
+  const MAX_WIDTH = 1200
   return new Promise((resolve) => {
     const img = new Image()
     img.onload = () => {
       const canvas = document.createElement('canvas')
-      canvas.width = img.width
-      canvas.height = img.height
+      let w = img.width
+      let h = img.height
+      if (w > MAX_WIDTH) {
+        const ratio = MAX_WIDTH / w
+        w = MAX_WIDTH
+        h = Math.round(h * ratio)
+      }
+      canvas.width = w
+      canvas.height = h
       const ctx = canvas.getContext('2d')!
-      ctx.drawImage(img, 0, 0)
-      canvas.toBlob((blob) => resolve(blob!), 'image/webp', 0.85)
+      ctx.drawImage(img, 0, 0, w, h)
+      canvas.toBlob((blob) => resolve(blob!), 'image/webp', 0.75)
     }
     img.src = URL.createObjectURL(file)
   })

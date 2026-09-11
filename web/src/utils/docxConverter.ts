@@ -72,7 +72,7 @@ export async function convertDocxToImages(
       rendered.toBlob((b: Blob | null) => {
         if (b) resolve(b)
         else resolve(new Blob([]))
-      }, 'image/webp', 0.85)
+      }, 'image/webp', 0.75)
     })
 
     pages.push({

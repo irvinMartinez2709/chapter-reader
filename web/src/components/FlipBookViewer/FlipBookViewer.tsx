@@ -244,7 +244,7 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
               useMouseEvents={true}
               swipeDistance={30}
               onFlip={onFlip}
-              style={{ touchAction: 'pan-y' }}
+              style={{ touchAction: 'pan-y pinch-zoom' }}
               startPage={currentPage}
               maxShadowOpacity={0.5}
               showPageCorners={!dims.single}
