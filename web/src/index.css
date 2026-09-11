@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0f172a;
+  --card: #1e293b;
+  --text: #f8fafc;
+  --accent: #6366f1;
+  --font-display: 'Dancing Script', 'Segoe Script', 'Apple Chancery', cursive;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-display);
+  background-color: var(--bg);
+  color: var(--text);
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+h1, h2, h3, h4, h5, h6, p, span, button, input, label, a, li, td, th, div {
+  font-family: var(--font-display);
+}
+
+input[type="text"], input[type="number"] {
+  font-family: var(--font-display);
+}
