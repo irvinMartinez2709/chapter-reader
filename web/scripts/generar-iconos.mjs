@@ -2,12 +2,10 @@ import sharp from "sharp";
 import fs from "node:fs";
 import path from "node:path";
 
-const SRC = path.resolve("public/icono.ico");
+const SRC = path.resolve("public/icono.png");
 const ANDROID = path.resolve("android/app/src/main/res");
 
-const meta = await sharp(SRC).metadata();
-const page = meta.pages ? meta.pages - 1 : 0;
-const base = await sharp(SRC, { page }).ensureAlpha().resize(1024, 1024, { fit: "cover" }).png().toBuffer();
+const base = await sharp(SRC).ensureAlpha().resize(1024, 1024, { fit: "cover" }).png().toBuffer();
 
 const DENSIDADES = { mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 };
 const CANVAS = { mdpi: 108, hdpi: 162, xhdpi: 216, xxhdpi: 324, xxxhdpi: 432 };
