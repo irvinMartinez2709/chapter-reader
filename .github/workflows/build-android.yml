@@ -52,6 +52,12 @@ jobs:
         working-directory: web
         run: npx cap sync android
 
+      - name: Generate app icons from icono.ico
+        working-directory: web
+        run: |
+          npm install --no-save sharp
+          node scripts/generar-iconos.mjs
+
       - name: Build APK
         working-directory: web/android
         run: ./gradlew assembleDebug
