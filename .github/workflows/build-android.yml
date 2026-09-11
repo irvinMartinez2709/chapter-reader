@@ -36,6 +36,10 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Install Capacitor Android
+        working-directory: web
+        run: npm install @capacitor/android
+
       - name: Build web app
         working-directory: web
         run: npm run build
