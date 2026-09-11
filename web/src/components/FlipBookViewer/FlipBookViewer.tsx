@@ -23,6 +23,16 @@ const PageComponent = React.memo(React.forwardRef<HTMLDivElement, { src: string;
 }))
 PageComponent.displayName = 'PageComponent'
 
+function isTouchDevice() {
+  if (typeof window === 'undefined') return false
+  return ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
+}
+
+function isPortrait() {
+  if (typeof window === 'undefined') return true
+  return window.innerHeight > window.innerWidth
+}
+
 export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onPageChange }: FlipBookViewerProps) {
   const lastReadKey = LAST_READ_KEY + '_' + bookId
   const bookmarksKey = BOOKMARKS_PREFIX + bookId
@@ -33,7 +43,7 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
 
   const [currentPage, setCurrentPage] = useState(savedPage < pages.length ? savedPage : initialPage)
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
+  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>(() => isPortrait() ? 'portrait' : 'landscape')
   const [zoom, setZoom] = useState(100)
   const [zoomInput, setZoomInput] = useState('100')
   const [showSingle, setShowSingle] = useState(false)
@@ -47,13 +57,15 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
   const zoomRef = useRef(zoom)
   const totalPages = pages.length
 
+  const touchDevice = useMemo(() => isTouchDevice(), [])
+
   useEffect(() => {
     let ticking = false
     const check = () => {
       if (ticking) return
       ticking = true
       requestAnimationFrame(() => {
-        setIsMobile(window.innerWidth < 768)
+        setOrientation(isPortrait() ? 'portrait' : 'landscape')
         ticking = false
       })
     }
@@ -62,12 +74,23 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // Guardar posición de lectura
+  const useSingle = touchDevice && orientation === 'portrait' || showSingle
+
   useEffect(() => {
     try { localStorage.setItem(lastReadKey, String(currentPage)) } catch {}
   }, [currentPage, lastReadKey])
 
   const getImgSrc = useCallback((page: PageData) => page.url || URL.createObjectURL(page.blob), [])
+
+  useEffect(() => {
+    return () => {
+      pages.forEach(p => {
+        if (!p.url && p.blob) {
+          try { URL.revokeObjectURL(URL.createObjectURL(p.blob)) } catch {}
+        }
+      })
+    }
+  }, [pages])
 
   const onFlip = useCallback((e: any) => {
     const p = e.data
@@ -121,8 +144,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
     }
   }, [])
 
-
-
   const applyZoomImmediate = useCallback((val: number) => {
     const clamped = Math.max(40, Math.min(250, val))
     setZoom(clamped)
@@ -150,9 +171,8 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
   }, [])
 
   const dims = useMemo(() => {
-    const useSingle = isMobile || showSingle
     const availH = window.innerHeight - 100
-    const availW = isMobile ? window.innerWidth - 16 : window.innerWidth - 32
+    const availW = window.innerWidth - 16
     const pageAspect = 3 / 4
 
     if (useSingle) {
@@ -167,9 +187,8 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
       if (totalW > availW) { w = (availW - 4) / 2; h = w / pageAspect }
       return { w: Math.round(w), h: Math.round(h), single: false }
     }
-  }, [isMobile, showSingle])
+  }, [useSingle])
 
-  // Key para forzar remount cuando cambia el modo
   const bookKey = `${dims.single ? 's' : 'd'}-${dims.w}-${dims.h}`
 
   if (pages.length === 0) {
@@ -181,10 +200,9 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
   }
 
   return (
-    <div ref={containerRef} className="relative w-full h-full flex flex-col overflow-hidden select-none" style={{ backgroundColor: 'var(--bg)' }}>
+    <div ref={containerRef} className="relative w-full h-full flex flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg)' }}>
       <div className="flex-1 flex items-center justify-center overflow-hidden min-h-0 pb-2">
         <div style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'center center', transition: 'transform 0.15s ease' }}>
-          {/* Leather book frame — darker, textured */}
           <div style={{
             padding: '14px 18px 18px 18px',
             borderRadius: '6px',
@@ -197,14 +215,12 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
             border: '1px solid rgba(60,35,15,0.6)',
             position: 'relative',
           }}>
-            {/* Stitching line */}
             <div style={{
               position: 'absolute', top: '6px', left: '6px', right: '6px', bottom: '6px',
               border: '1px dashed rgba(100,65,25,0.35)',
               borderRadius: '4px',
               pointerEvents: 'none',
             }} />
-            {/* Spine shadow on left */}
             <div style={{
               position: 'absolute', top: '10px', left: '10px', bottom: '10px', width: '14px',
               background: 'linear-gradient(90deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.15) 40%, transparent 100%)',
@@ -228,7 +244,7 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
               useMouseEvents={true}
               swipeDistance={30}
               onFlip={onFlip}
-              style={{}}
+              style={{ touchAction: 'pan-y' }}
               startPage={currentPage}
               maxShadowOpacity={0.5}
               showPageCorners={!dims.single}
@@ -249,7 +265,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
 
       {/* Toolbar */}
       <div className="shrink-0 backdrop-blur-sm border-t px-2 py-1.5 flex items-center justify-between gap-1 flex-wrap" style={{ backgroundColor: 'color-mix(in srgb, var(--bg) 90%, #000)', borderColor: 'color-mix(in srgb, var(--accent) 20%, transparent)' }}>
-        {/* Navegación + Salto a página */}
         <div className="flex items-center gap-1">
           <button onClick={flipPrev} className="p-1.5 rounded transition-all active:scale-95 hover:opacity-80" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -274,7 +289,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
           </button>
         </div>
 
-        {/* Modo página */}
         <div className="flex items-center gap-1">
           <button onClick={() => setShowSingle(true)}
             className="px-2 py-1 rounded text-xs transition-all"
@@ -288,7 +302,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
           </button>
         </div>
 
-        {/* Zoom */}
         <div className="flex items-center gap-1">
           <button onClick={() => applyZoomImmediate(zoom - 15)} className="p-1.5 rounded transition-all active:scale-95 hover:opacity-80" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -314,7 +327,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
           <button onClick={() => applyZoomImmediate(100)} className="px-1.5 py-1 rounded text-xs" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>1:1</button>
         </div>
 
-        {/* Fullscreen + Bookmarks */}
         <div className="flex items-center gap-1 relative">
           <button onClick={toggleBookmark}
             className="p-1.5 rounded transition-all active:scale-95"
@@ -348,7 +360,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
             </svg>
           </button>
 
-          {/* Panel de marcadores */}
           {showBookmarks && (
             <div className="absolute bottom-full right-0 mb-2 w-48 max-h-48 overflow-y-auto rounded-xl shadow-2xl border z-50" style={{ backgroundColor: 'var(--card)', borderColor: 'color-mix(in srgb, var(--accent) 30%, transparent)' }}>
               <div className="p-2">
