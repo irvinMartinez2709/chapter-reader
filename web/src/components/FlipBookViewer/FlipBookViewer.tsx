@@ -10,7 +10,7 @@ interface FlipBookViewerProps {
 
 const LAST_READ_KEY = 'flippdf_last_read'
 const BOOKMARKS_PREFIX = 'flippdf_bookmarks_'
-const PRELOAD_AHEAD = 2
+const PRELOAD_AHEAD = 3
 const PRELOAD_BEHIND = 1
 
 const PageImg = React.memo(({ src, alt }: { src: string; alt?: string }) => (
@@ -40,7 +40,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
   }, [lastReadKey])
 
   const [currentPage, setCurrentPage] = useState(savedPage < pages.length ? savedPage : initialPage)
-  const [flipDir, setFlipDir] = useState<'next' | 'prev' | null>(null)
   const [isFlipping, setIsFlipping] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait')
@@ -54,9 +53,9 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
   const [showBookmarks, setShowBookmarks] = useState(false)
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const bookRef = useRef<HTMLDivElement>(null)
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
-  const flipTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const totalPages = pages.length
   const touchDevice = useMemo(() => isTouchDevice(), [])
 
@@ -83,18 +82,13 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
     try { localStorage.setItem(lastReadKey, String(currentPage)) } catch {}
   }, [currentPage, lastReadKey])
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => { if (flipTimer.current) clearTimeout(flipTimer.current) }
-  }, [])
-
-  // Get image src (lazy - only create objectURL when needed)
+  // Get image src
   const getImgSrc = useCallback((page: PageData) => {
     if (page.url) return page.url
     return URL.createObjectURL(page.blob)
   }, [])
 
-  // Preload: preload pages around current
+  // Preload set
   const preloadedPages = useMemo(() => {
     const start = Math.max(0, currentPage - PRELOAD_BEHIND)
     const end = Math.min(totalPages - 1, currentPage + (useSingle ? PRELOAD_AHEAD : PRELOAD_AHEAD + 1))
@@ -103,38 +97,58 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
     return set
   }, [currentPage, totalPages, useSingle])
 
-  // Go to page
-  const goToPage = useCallback((idx: number, direction: 'next' | 'prev' = 'next') => {
-    if (idx < 0 || idx >= totalPages || idx === currentPage || isFlipping) return
+  // Flip animation — pure DOM class, no state change during animation
+  const doFlip = useCallback((targetPage: number, direction: 'next' | 'prev') => {
+    const el = bookRef.current
+    if (!el || isFlipping || targetPage < 0 || targetPage >= totalPages || targetPage === currentPage) return
 
-    setFlipDir(direction)
     setIsFlipping(true)
-    setCurrentPage(idx)
-    setPageInput(String(idx + 1))
-    onPageChange?.(idx)
 
-    if (flipTimer.current) clearTimeout(flipTimer.current)
-    flipTimer.current = setTimeout(() => {
-      setIsFlipping(false)
-      setFlipDir(null)
-    }, 400)
-  }, [totalPages, currentPage, isFlipping, onPageChange])
+    // Remove any previous animation class
+    el.classList.remove('flip-exit-next', 'flip-exit-prev')
+
+    // Force reflow to ensure clean state
+    void el.offsetWidth
+
+    // Add exit animation class
+    el.classList.add(direction === 'next' ? 'flip-exit-next' : 'flip-exit-prev')
+
+    // After exit animation, update page and show enter animation
+    setTimeout(() => {
+      el.classList.remove('flip-exit-next', 'flip-exit-prev')
+
+      setCurrentPage(targetPage)
+      setPageInput(String(targetPage + 1))
+      onPageChange?.(targetPage)
+
+      // Force reflow before adding enter class
+      void el.offsetWidth
+
+      el.classList.add(direction === 'next' ? 'flip-enter-next' : 'flip-enter-prev')
+
+      // Remove enter class after animation
+      setTimeout(() => {
+        el.classList.remove('flip-enter-next', 'flip-enter-prev')
+        setIsFlipping(false)
+      }, 300)
+    }, 300)
+  }, [isFlipping, totalPages, currentPage, onPageChange])
 
   const flipNext = useCallback(() => {
     const step = useSingle ? 1 : 2
-    goToPage(Math.min(currentPage + step, totalPages - 1), 'next')
-  }, [currentPage, totalPages, useSingle, goToPage])
+    doFlip(Math.min(currentPage + step, totalPages - 1), 'next')
+  }, [currentPage, totalPages, useSingle, doFlip])
 
   const flipPrev = useCallback(() => {
     const step = useSingle ? 1 : 2
-    goToPage(Math.max(currentPage - step, 0), 'prev')
-  }, [currentPage, useSingle, goToPage])
+    doFlip(Math.max(currentPage - step, 0), 'prev')
+  }, [currentPage, useSingle, doFlip])
 
   const goToPageNum = useCallback((num: number) => {
     const idx = Math.max(0, Math.min(num - 1, totalPages - 1))
-    const direction = idx > currentPage ? 'next' : 'prev'
-    goToPage(idx, direction)
-  }, [totalPages, currentPage, goToPage])
+    if (idx === currentPage) return
+    doFlip(idx, idx > currentPage ? 'next' : 'prev')
+  }, [totalPages, currentPage, doFlip])
 
   // Touch handlers
   const onTouchStart = useCallback((e: React.TouchEvent) => {
@@ -229,7 +243,7 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
     })
   }, [bookmarksKey])
 
-  // Calculate dimensions
+  // Dimensions
   const dims = useMemo(() => {
     const availH = window.innerHeight - 100
     const availW = window.innerWidth - 16
@@ -249,11 +263,9 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
     }
   }, [useSingle])
 
-  // Pages to display
+  // Pages to display — always stable, never changes during animation
   const leftPage = useSingle ? null : (currentPage > 0 ? currentPage - 1 : null)
   const rightPage = currentPage
-
-  const flipClass = isFlipping ? (flipDir === 'next' ? 'flip-exit-next' : 'flip-exit-prev') : ''
 
   if (pages.length === 0) {
     return (
@@ -269,7 +281,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
       className="relative w-full h-full flex flex-col overflow-hidden"
       style={{ backgroundColor: 'var(--bg)' }}
     >
-      {/* Book area */}
       <div
         className="flex-1 flex items-center justify-center overflow-hidden min-h-0 pb-2"
         onTouchStart={onTouchStart}
@@ -298,7 +309,7 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
               borderRadius: '4px',
               pointerEvents: 'none',
             }} />
-            {/* Spine shadow */}
+            {/* Spine */}
             <div style={{
               position: 'absolute', top: '10px', left: '10px', bottom: '10px', width: '14px',
               background: 'linear-gradient(90deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.15) 40%, transparent 100%)',
@@ -306,54 +317,40 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
               pointerEvents: 'none',
             }} />
 
-            {/* Pages container */}
-            <div style={{
-              display: 'flex',
-              position: 'relative',
-              perspective: '2000px',
-            }}>
+            {/* Book pages — NEVER unmounts, only CSS classes change */}
+            <div
+              ref={bookRef}
+              style={{
+                display: 'flex',
+                position: 'relative',
+                perspective: '2000px',
+              }}
+            >
               {/* Left page (double mode) */}
               {!dims.single && leftPage !== null && (
                 <div style={{
                   width: dims.w,
                   height: dims.h,
-                  position: 'relative',
                   overflow: 'hidden',
                   backgroundColor: '#fff',
-                  borderRight: '1px solid rgba(0,0,0,0.1)',
                   flexShrink: 0,
                 }}>
-                  {preloadedPages.has(leftPage) ? (
+                  {preloadedPages.has(leftPage) && (
                     <PageImg src={getImgSrc(pages[leftPage])} alt={`Página ${leftPage + 1}`} />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
-                      <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'rgba(0,0,0,0.1)', borderTopColor: 'transparent' }} />
-                    </div>
                   )}
                 </div>
               )}
 
-              {/* Right page / Single page */}
-              <div
-                className={flipClass}
-                style={{
-                  width: dims.w,
-                  height: dims.h,
-                  position: 'relative',
-                  overflow: 'hidden',
-                  backgroundColor: '#fff',
-                  flexShrink: 0,
-                  transformOrigin: dims.single ? 'center center' : 'left center',
-                  backfaceVisibility: 'hidden',
-                  willChange: isFlipping ? 'transform' : 'auto',
-                }}
-              >
-                {preloadedPages.has(rightPage) ? (
+              {/* Right page / Single — NEVER unmounts */}
+              <div style={{
+                width: dims.w,
+                height: dims.h,
+                overflow: 'hidden',
+                backgroundColor: '#fff',
+                flexShrink: 0,
+              }}>
+                {preloadedPages.has(rightPage) && (
                   <PageImg src={getImgSrc(pages[rightPage])} alt={`Página ${rightPage + 1}`} />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
-                    <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'rgba(0,0,0,0.1)', borderTopColor: 'transparent' }} />
-                  </div>
                 )}
               </div>
             </div>
@@ -363,7 +360,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
 
       {/* Toolbar */}
       <div className="shrink-0 backdrop-blur-sm border-t px-2 py-1.5 flex items-center justify-between gap-1 flex-wrap" style={{ backgroundColor: 'color-mix(in srgb, var(--bg) 90%, #000)', borderColor: 'color-mix(in srgb, var(--accent) 20%, transparent)' }}>
-        {/* Nav */}
         <div className="flex items-center gap-1">
           <button onClick={flipPrev} className="p-1.5 rounded transition-all active:scale-95 hover:opacity-80" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -388,7 +384,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
           </button>
         </div>
 
-        {/* Mode */}
         <div className="flex items-center gap-1">
           <button onClick={() => setShowSingle(true)}
             className="px-2 py-1 rounded text-xs transition-all"
@@ -402,7 +397,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
           </button>
         </div>
 
-        {/* Zoom */}
         <div className="flex items-center gap-1">
           <button onClick={() => applyZoom(zoom - 15)} className="p-1.5 rounded transition-all active:scale-95 hover:opacity-80" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -428,7 +422,6 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
           <button onClick={() => applyZoom(100)} className="px-1.5 py-1 rounded text-xs" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>1:1</button>
         </div>
 
-        {/* Bookmarks + Fullscreen */}
         <div className="flex items-center gap-1 relative">
           <button onClick={toggleBookmark}
             className="p-1.5 rounded transition-all active:scale-95"
