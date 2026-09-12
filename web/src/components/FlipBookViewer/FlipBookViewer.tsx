@@ -53,15 +53,21 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
   const [showBookmarks, setShowBookmarks] = useState(false)
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const bookRef = useRef<HTMLDivElement>(null)
+  const leftPageRef = useRef<HTMLDivElement>(null)
+  const rightPageRef = useRef<HTMLDivElement>(null)
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
   const totalPages = pages.length
   const touchDevice = useMemo(() => isTouchDevice(), [])
 
-  const useSingle = touchDevice && orientation === 'portrait' || showSingle
+  const useSingle = (touchDevice && orientation === 'portrait') || showSingle
 
-  // Orientation detection
+  // Pre-compute ALL image sources once — never recreate
+  const imgSrcs = useMemo(() => {
+    return pages.map(p => p.url || URL.createObjectURL(p.blob))
+  }, [pages])
+
+  // Orientation
   useEffect(() => {
     let ticking = false
     const check = () => {
@@ -82,57 +88,49 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
     try { localStorage.setItem(lastReadKey, String(currentPage)) } catch {}
   }, [currentPage, lastReadKey])
 
-  // Get image src
-  const getImgSrc = useCallback((page: PageData) => {
-    if (page.url) return page.url
-    return URL.createObjectURL(page.blob)
-  }, [])
-
   // Preload set
   const preloadedPages = useMemo(() => {
     const start = Math.max(0, currentPage - PRELOAD_BEHIND)
     const end = Math.min(totalPages - 1, currentPage + (useSingle ? PRELOAD_AHEAD : PRELOAD_AHEAD + 1))
-    const set = new Set<number>()
-    for (let i = start; i <= end; i++) set.add(i)
-    return set
+    const s = new Set<number>()
+    for (let i = start; i <= end; i++) s.add(i)
+    return s
   }, [currentPage, totalPages, useSingle])
 
-  // Flip animation — pure DOM class, no state change during animation
+  // Flip animation — pure DOM, zero React state during animation
   const doFlip = useCallback((targetPage: number, direction: 'next' | 'prev') => {
-    const el = bookRef.current
-    if (!el || isFlipping || targetPage < 0 || targetPage >= totalPages || targetPage === currentPage) return
+    if (isFlipping || targetPage < 0 || targetPage >= totalPages || targetPage === currentPage) return
+
+    const el = useSingle ? rightPageRef.current : (direction === 'next' ? rightPageRef.current : leftPageRef.current)
+    if (!el) return
 
     setIsFlipping(true)
 
-    // Remove any previous animation class
-    el.classList.remove('flip-exit-next', 'flip-exit-prev')
-
-    // Force reflow to ensure clean state
+    // Clear previous animation
+    el.classList.remove('flip-exit-next', 'flip-exit-prev', 'flip-enter-next', 'flip-enter-prev')
     void el.offsetWidth
 
-    // Add exit animation class
+    // Exit animation
     el.classList.add(direction === 'next' ? 'flip-exit-next' : 'flip-exit-prev')
 
-    // After exit animation, update page and show enter animation
     setTimeout(() => {
       el.classList.remove('flip-exit-next', 'flip-exit-prev')
+      void el.offsetWidth
 
+      // Update page
       setCurrentPage(targetPage)
       setPageInput(String(targetPage + 1))
       onPageChange?.(targetPage)
 
-      // Force reflow before adding enter class
-      void el.offsetWidth
-
+      // Enter animation on the NEW page
       el.classList.add(direction === 'next' ? 'flip-enter-next' : 'flip-enter-prev')
 
-      // Remove enter class after animation
       setTimeout(() => {
         el.classList.remove('flip-enter-next', 'flip-enter-prev')
         setIsFlipping(false)
       }, 300)
     }, 300)
-  }, [isFlipping, totalPages, currentPage, onPageChange])
+  }, [isFlipping, totalPages, currentPage, useSingle, onPageChange])
 
   const flipNext = useCallback(() => {
     const step = useSingle ? 1 : 2
@@ -150,7 +148,7 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
     doFlip(idx, idx > currentPage ? 'next' : 'prev')
   }, [totalPages, currentPage, doFlip])
 
-  // Touch handlers
+  // Touch
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     if (isFlipping) return
     touchStartX.current = e.touches[0].clientX
@@ -263,7 +261,7 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
     }
   }, [useSingle])
 
-  // Pages to display — always stable, never changes during animation
+  // Which pages to show
   const leftPage = useSingle ? null : (currentPage > 0 ? currentPage - 1 : null)
   const rightPage = currentPage
 
@@ -276,11 +274,7 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full h-full flex flex-col overflow-hidden"
-      style={{ backgroundColor: 'var(--bg)' }}
-    >
+    <div ref={containerRef} className="relative w-full h-full flex flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg)' }}>
       <div
         className="flex-1 flex items-center justify-center overflow-hidden min-h-0 pb-2"
         onTouchStart={onTouchStart}
@@ -313,44 +307,42 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
             <div style={{
               position: 'absolute', top: '10px', left: '10px', bottom: '10px', width: '14px',
               background: 'linear-gradient(90deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.15) 40%, transparent 100%)',
-              borderRadius: '2px',
-              pointerEvents: 'none',
+              borderRadius: '2px', pointerEvents: 'none',
             }} />
 
-            {/* Book pages — NEVER unmounts, only CSS classes change */}
-            <div
-              ref={bookRef}
-              style={{
-                display: 'flex',
-                position: 'relative',
-                perspective: '2000px',
-              }}
-            >
-              {/* Left page (double mode) */}
+            {/* Pages */}
+            <div style={{ display: 'flex', perspective: '2000px' }}>
+              {/* Left page */}
               {!dims.single && leftPage !== null && (
-                <div style={{
-                  width: dims.w,
-                  height: dims.h,
-                  overflow: 'hidden',
-                  backgroundColor: '#fff',
-                  flexShrink: 0,
-                }}>
+                <div
+                  ref={leftPageRef}
+                  style={{
+                    width: dims.w, height: dims.h,
+                    overflow: 'hidden', backgroundColor: '#fff',
+                    flexShrink: 0,
+                    transformOrigin: 'right center',
+                    backfaceVisibility: 'hidden',
+                  }}
+                >
                   {preloadedPages.has(leftPage) && (
-                    <PageImg src={getImgSrc(pages[leftPage])} alt={`Página ${leftPage + 1}`} />
+                    <PageImg src={imgSrcs[leftPage]} alt={`Página ${leftPage + 1}`} />
                   )}
                 </div>
               )}
 
-              {/* Right page / Single — NEVER unmounts */}
-              <div style={{
-                width: dims.w,
-                height: dims.h,
-                overflow: 'hidden',
-                backgroundColor: '#fff',
-                flexShrink: 0,
-              }}>
+              {/* Right page / Single */}
+              <div
+                ref={rightPageRef}
+                style={{
+                  width: dims.w, height: dims.h,
+                  overflow: 'hidden', backgroundColor: '#fff',
+                  flexShrink: 0,
+                  transformOrigin: 'left center',
+                  backfaceVisibility: 'hidden',
+                }}
+              >
                 {preloadedPages.has(rightPage) && (
-                  <PageImg src={getImgSrc(pages[rightPage])} alt={`Página ${rightPage + 1}`} />
+                  <PageImg src={imgSrcs[rightPage]} alt={`Página ${rightPage + 1}`} />
                 )}
               </div>
             </div>
@@ -362,14 +354,9 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
       <div className="shrink-0 backdrop-blur-sm border-t px-2 py-1.5 flex items-center justify-between gap-1 flex-wrap" style={{ backgroundColor: 'color-mix(in srgb, var(--bg) 90%, #000)', borderColor: 'color-mix(in srgb, var(--accent) 20%, transparent)' }}>
         <div className="flex items-center gap-1">
           <button onClick={flipPrev} className="p-1.5 rounded transition-all active:scale-95 hover:opacity-80" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           </button>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={pageInput}
+          <input type="text" inputMode="numeric" value={pageInput}
             onChange={(e) => setPageInput(e.target.value.replace(/[^0-9]/g, ''))}
             onBlur={() => goToPageNum(parseInt(pageInput) || 1)}
             onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); goToPageNum(parseInt(pageInput) || 1) } }}
@@ -378,35 +365,20 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
           />
           <span className="text-xs opacity-50">/{totalPages}</span>
           <button onClick={flipNext} className="p-1.5 rounded transition-all active:scale-95 hover:opacity-80" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
           </button>
         </div>
 
         <div className="flex items-center gap-1">
-          <button onClick={() => setShowSingle(true)}
-            className="px-2 py-1 rounded text-xs transition-all"
-            style={{ backgroundColor: showSingle ? 'var(--accent)' : 'var(--card)', color: 'var(--text)' }}>
-            1
-          </button>
-          <button onClick={() => setShowSingle(false)}
-            className="px-2 py-1 rounded text-xs transition-all"
-            style={{ backgroundColor: !showSingle ? 'var(--accent)' : 'var(--card)', color: 'var(--text)' }}>
-            2
-          </button>
+          <button onClick={() => setShowSingle(true)} className="px-2 py-1 rounded text-xs transition-all" style={{ backgroundColor: showSingle ? 'var(--accent)' : 'var(--card)', color: 'var(--text)' }}>1</button>
+          <button onClick={() => setShowSingle(false)} className="px-2 py-1 rounded text-xs transition-all" style={{ backgroundColor: !showSingle ? 'var(--accent)' : 'var(--card)', color: 'var(--text)' }}>2</button>
         </div>
 
         <div className="flex items-center gap-1">
           <button onClick={() => applyZoom(zoom - 15)} className="p-1.5 rounded transition-all active:scale-95 hover:opacity-80" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
-            </svg>
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" /></svg>
           </button>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={zoomInput}
+          <input type="text" inputMode="numeric" value={zoomInput}
             onChange={(e) => setZoomInput(e.target.value.replace(/[^0-9]/g, ''))}
             onBlur={() => applyZoom(parseInt(zoomInput) || 100)}
             onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); applyZoom(parseInt(zoomInput) || 100) } }}
@@ -415,42 +387,23 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
           />
           <span className="text-xs opacity-50">%</span>
           <button onClick={() => applyZoom(zoom + 15)} className="p-1.5 rounded transition-all active:scale-95 hover:opacity-80" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
-            </svg>
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" /></svg>
           </button>
           <button onClick={() => applyZoom(100)} className="px-1.5 py-1 rounded text-xs" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>1:1</button>
         </div>
 
         <div className="flex items-center gap-1 relative">
-          <button onClick={toggleBookmark}
-            className="p-1.5 rounded transition-all active:scale-95"
-            style={{ backgroundColor: isBookmarked ? 'var(--accent)' : 'var(--card)', color: 'var(--text)' }}
-            title={isBookmarked ? 'Quitar marcador' : 'Marcar página'}>
-            <svg className="w-3.5 h-3.5" fill={isBookmarked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-            </svg>
+          <button onClick={toggleBookmark} className="p-1.5 rounded transition-all active:scale-95" style={{ backgroundColor: isBookmarked ? 'var(--accent)' : 'var(--card)', color: 'var(--text)' }}>
+            <svg className="w-3.5 h-3.5" fill={isBookmarked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
           </button>
           {bookmarks.length > 0 && (
-            <button onClick={() => setShowBookmarks(!showBookmarks)}
-              className="p-1.5 rounded transition-all active:scale-95"
-              style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}
-              title="Ver marcadores">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-              </svg>
-              <span className="absolute -top-1 -right-1 text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold" style={{ backgroundColor: 'var(--accent)', color: 'var(--text)' }}>
-                {bookmarks.length}
-              </span>
+            <button onClick={() => setShowBookmarks(!showBookmarks)} className="p-1.5 rounded transition-all active:scale-95" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
+              <span className="absolute -top-1 -right-1 text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold" style={{ backgroundColor: 'var(--accent)', color: 'var(--text)' }}>{bookmarks.length}</span>
             </button>
           )}
           <button onClick={toggleFullscreen} className="p-1.5 rounded transition-all active:scale-95 hover:opacity-80" style={{ backgroundColor: 'var(--card)', color: 'var(--accent)' }}>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d={isFullscreen
-                  ? "M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25"
-                  : "M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"} />
-            </svg>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={isFullscreen ? "M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" : "M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"} /></svg>
           </button>
 
           {showBookmarks && (
@@ -459,15 +412,9 @@ export function FlipBookViewer({ pages, bookId = 'default', initialPage = 0, onP
                 <p className="text-[10px] px-1 mb-1 opacity-50" style={{ fontFamily: 'var(--font-display)' }}>Marcadores</p>
                 {bookmarks.map((page) => (
                   <div key={page} className="flex items-center justify-between px-1 py-1 rounded group" style={{ color: 'var(--text)' }}>
-                    <button onClick={() => { goToPageNum(page + 1); setShowBookmarks(false) }}
-                      className="text-xs flex-1 text-left px-1" style={{ fontFamily: 'var(--font-display)' }}>
-                      Página {page + 1}
-                    </button>
-                    <button onClick={() => removeBookmark(page)}
-                      className="hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
+                    <button onClick={() => { goToPageNum(page + 1); setShowBookmarks(false) }} className="text-xs flex-1 text-left px-1" style={{ fontFamily: 'var(--font-display)' }}>Página {page + 1}</button>
+                    <button onClick={() => removeBookmark(page)} className="hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   </div>
                 ))}

@@ -26,48 +26,45 @@ input[type="text"], input[type="number"] {
   font-family: var(--font-display);
 }
 
-/* Flip animation — forward (next page, swipe left) */
+/* Flip animation — right page exits left (forward) */
 @keyframes flipExitNext {
-  0% { transform: rotateY(0deg); box-shadow: none; }
-  100% { transform: rotateY(-90deg); box-shadow: -4px 0 12px rgba(0,0,0,0.3); }
+  0% { transform: rotateY(0deg); box-shadow: 0 0 0 rgba(0,0,0,0); }
+  50% { box-shadow: -6px 0 20px rgba(0,0,0,0.4); }
+  100% { transform: rotateY(-110deg); box-shadow: 0 0 0 rgba(0,0,0,0); }
 }
-
 @keyframes flipEnterNext {
-  0% { transform: rotateY(90deg); }
+  0% { transform: rotateY(110deg); }
   100% { transform: rotateY(0deg); }
 }
 
-/* Flip animation — backward (prev page, swipe right) */
+/* Flip animation — left page exits right (backward) */
 @keyframes flipExitPrev {
-  0% { transform: rotateY(0deg); box-shadow: none; }
-  100% { transform: rotateY(90deg); box-shadow: 4px 0 12px rgba(0,0,0,0.3); }
+  0% { transform: rotateY(0deg); box-shadow: 0 0 0 rgba(0,0,0,0); }
+  50% { box-shadow: 6px 0 20px rgba(0,0,0,0.4); }
+  100% { transform: rotateY(110deg); box-shadow: 0 0 0 rgba(0,0,0,0); }
 }
-
 @keyframes flipEnterPrev {
-  0% { transform: rotateY(-90deg); }
+  0% { transform: rotateY(-110deg); }
   100% { transform: rotateY(0deg); }
 }
 
 .flip-exit-next {
-  animation: flipExitNext 0.3s ease-in forwards;
+  animation: flipExitNext 0.35s ease-in-out forwards;
   transform-origin: left center;
   backface-visibility: hidden;
 }
-
 .flip-enter-next {
-  animation: flipEnterNext 0.3s ease-out forwards;
+  animation: flipEnterNext 0.35s ease-out forwards;
   transform-origin: left center;
   backface-visibility: hidden;
 }
-
 .flip-exit-prev {
-  animation: flipExitPrev 0.3s ease-in forwards;
+  animation: flipExitPrev 0.35s ease-in-out forwards;
   transform-origin: right center;
   backface-visibility: hidden;
 }
-
 .flip-enter-prev {
-  animation: flipEnterPrev 0.3s ease-out forwards;
+  animation: flipEnterPrev 0.35s ease-out forwards;
   transform-origin: right center;
   backface-visibility: hidden;
 }
